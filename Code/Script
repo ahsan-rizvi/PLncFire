@@ -2,27 +2,27 @@
 
 #PBS -N mrna_pipeline
 #PBS -l nodes=1:ppn=30
-#PBS -o /home/SurbhiMistry/mrna/pipeline/Result/Aradu/job.$PBS_JOBID.out
-#PBS -e /home/SurbhiMistry/mrna/pipeline/Result/Aradu/job.$PBS_JOBID.err
+#PBS -o /path for output/job.$PBS_JOBID.out
+#PBS -e /path for error/job.$PBS_JOBID.err
 
 set -e
 
 # Parameters
 Proc=30
-Software_Directory="/home/SurbhiMistry/Software"
-Out_Directory="/home/SurbhiMistry/mrna/pipeline/Result/Aradu"
-Scratch_Directory="/home/SurbhiMistry/mrna/pipeline/Result/Aradu"
+Software_Directory="/path/Software"
+Out_Directory="/path/Aradu"
+Scratch_Directory="/path/Aradu"
 Min_length=200
 
-export FEELNCPATH=/home/SurbhiMistry/Software/FEELnc/bin/
-export PERL5LIB=$PERL5LIB:/home/SurbhiMistry/Software/FEELnc/lib/
+export FEELNCPATH=/path/FEELnc/bin/
+export PERL5LIB=$PERL5LIB:/path/FEELnc/lib/
 
 
 # Peanut
-Rna_seq_folder="/home/SurbhiMistry/Data/Peanut/RNA_Seq"
-Genome="/home/SurbhiMistry/Data/Peanut/Genome/A/GCF_000817695.2_Aradu1.1_genomic.fna"
-Index="/home/SurbhiMistry/Data/Peanut/Genome/A/GCF_000817695.2_Aradu1.1_genomic"
-mRNA="/home/SurbhiMistry/Data/Peanut/Genome/A/Aradu_mRNA.gtf"
+Rna_seq_folder="/path/RNA_Seq"
+Genome="/path/GCF_000817695.2_Aradu1.1_genomic.fna"
+Index="/path/GCF_000817695.2_Aradu1.1_genomic"
+mRNA="/path/Aradu_mRNA.gtf"
 
 # Automatically gather SRA IDs from the folder
 SRAids=()
@@ -72,9 +72,16 @@ sort_alignments() {
 assemble_transcripts() {
     local sraid=$1
     $Stringtie_Path -p $Proc --rf -G ${Index}.gtf -o $Scratch_Directory/$sraid.transcripts.gtf $Scratch_Directory/$sraid.bam
-#    $Stringtie_Path -e -B -G ${Index}.gtf -o $Scratch_Directory/$sraid.transcripts.gtf $Scratch_Directory/$sraid.bam
+#   $Stringtie_Path -e -B -G ${Index}.gtf -o $Scratch_Directory/$sraid.transcripts.gtf $Scratch_Directory/$sraid.bam
     $GFFread_Path/gffread -w $Scratch_Directory/$sraid.transcripts.fasta -g $Genome $Scratch_Directory/$sraid.transcripts.gtf
     grep '>' $Scratch_Directory/$sraid.transcripts.fasta | awk '{print $1}' | sed 's/>//g' | sort -u > $Scratch_Directory/$sraid.transcripts.txt
+}
+
+# Merge transcripts
+Merge_transcripts() {
+    stringtie --merge -o candidate_transcript.gtf -G genome.gtf SRR*.gtf
+    gffread -w candidate_transcript.fasta -g genome.fasta candidate_transcript.gtf
+    grep '>' candidate_transcript.fasta | awk '{print $1}' | sed 's/>//g' | sort -u > candidate_transcript.txt
 }
 
 # Filter transcripts by length
@@ -93,14 +100,54 @@ filter_long_transcript() {
     cut -d ";" -f 2 $Scratch_Directory/$sraid.candidate_long_transcripts.gtf | sed 's/ transcript_id //g' | sed 's/"//g' | sort -u > $Scratch_Directory/$sraid.long_transcripts.txt
 }
 
+# Using LncFinder-plant
+LncFinder() {
+    local sraid=$1
+}
+
+
+# Using CPAT
 CPAT() {
     local sraid=$1
-  #  $Python_Path
+  # $Python_Path
     cpat -x $Scratch_Directory/Aradu_Plant_Hexamer.tsv -d $Scratch_Directory/Aradu_Plant.logit.RData.logit.RData -g $Scratch_Directory/$sraid.transcripts.fasta --min-orf=120  -o $Scratch_Directory/$sraid.CPAT_plant.output
 }
 
+# Using Uniprot
 UniProt() {
     local sraid=$1
     $Software_Directory/diamond makedb --in uniprot_sprot.fasta -d uniprot_out
     $Software_Directory/diamond blastx -d uniprot_out -q $Scratch_Directory/$sraid.transcripts.fasta -o $Scratch_Directory/$sraid.uniprotoutput.txt
 }
+
+# Using FEELnc
+FEELnc() {
+    local sraid=$1
+}
+
+# Main Pipeline Execution
+index_genome
+
+echo "Processing Stage 1"
+
+for sraid in "${SRAids[@]}"; do
+    echo "Processing sample: $sraid"
+    align_reads $sraid
+    sort_alignments $sraid
+    assemble_transcripts $sraid
+done
+
+echo "Processing Stage 2"
+
+Merge_transcripts
+filter_transcripts 
+filter_long_transcript 
+LncFinder $sraid
+CPAT $sraid
+UniProt
+FEELnc 
+Result_combine
+
+
+
+echo "Pipeline completed successfully."
