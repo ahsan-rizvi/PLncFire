@@ -1,3 +1,106 @@
-```bash
-python3 code/main.py --epoch XXXX --lr XXXX
-```
+#!/bin/sh
+
+#PBS -N mrna_pipeline
+#PBS -l nodes=1:ppn=30
+#PBS -o /home/SurbhiMistry/mrna/pipeline/Result/Aradu/job.$PBS_JOBID.out
+#PBS -e /home/SurbhiMistry/mrna/pipeline/Result/Aradu/job.$PBS_JOBID.err
+
+set -e
+
+# Parameters
+Proc=30
+Software_Directory="/home/SurbhiMistry/Software"
+Out_Directory="/home/SurbhiMistry/mrna/pipeline/Result/Aradu"
+Scratch_Directory="/home/SurbhiMistry/mrna/pipeline/Result/Aradu"
+Min_length=200
+
+export FEELNCPATH=/home/SurbhiMistry/Software/FEELnc/bin/
+export PERL5LIB=$PERL5LIB:/home/SurbhiMistry/Software/FEELnc/lib/
+
+
+# Peanut
+Rna_seq_folder="/home/SurbhiMistry/Data/Peanut/RNA_Seq"
+Genome="/home/SurbhiMistry/Data/Peanut/Genome/A/GCF_000817695.2_Aradu1.1_genomic.fna"
+Index="/home/SurbhiMistry/Data/Peanut/Genome/A/GCF_000817695.2_Aradu1.1_genomic"
+mRNA="/home/SurbhiMistry/Data/Peanut/Genome/A/Aradu_mRNA.gtf"
+
+# Automatically gather SRA IDs from the folder
+SRAids=()
+for file in $Rna_seq_folder/*.fastq; do
+    filename=$(basename "$file")
+    sraid="${filename%%.*}"  # Extract the part before the first dot (.)
+    SRAids+=("$sraid")
+    echo "$sraid"
+done
+
+# Tool Paths
+Hisat_Path="$Software_Directory/hisat-3n"
+Bwa_Path="$Software_Directory/bwa"
+Samtool_Path="$Software_Directory/samtool/samtools-1.3.1/samtools"
+Bedtool_Path="$Software_Directory/bedtools2/bin"
+Stringtie_Path="$Software_Directory/stringtie-2.2.1/stringtie"
+GFFread_Path="$Software_Directory/gffread"
+GFFCompare_Path="$Software_Directory/gffcompare"
+Python_Path="/usr/local/bin/python3"
+FEELnc_Path="$Software_Directory/FEELnc/scripts"
+
+# Index the reference genome
+index_genome() {
+    if [ ! -f "${Index}.1.ht2" ]; then
+        $Hisat_Path/hisat2-build -p $Proc $Genome $Index
+    else
+        echo "Index files already exist. Skipping hisat2-build."
+    fi
+}
+
+# Align RNA-seq reads
+align_reads() {
+    local sraid=$1
+    $Hisat_Path/hisat2 --new-summary --rna-strandness RF -p $Proc \
+      -x $Index \
+      -U $Rna_seq_folder/$sraid.clean.fastq \
+      -S $Scratch_Directory/$sraid.sam
+}
+
+# Sort and compress alignments
+sort_alignments() {
+    local sraid=$1
+    $Samtool_Path sort -o $Scratch_Directory/$sraid.bam $Scratch_Directory/$sraid.sam
+}
+
+# Assemble transcripts
+assemble_transcripts() {
+    local sraid=$1
+    $Stringtie_Path -p $Proc --rf -G ${Index}.gtf -o $Scratch_Directory/$sraid.transcripts.gtf $Scratch_Directory/$sraid.bam
+#    $Stringtie_Path -e -B -G ${Index}.gtf -o $Scratch_Directory/$sraid.transcripts.gtf $Scratch_Directory/$sraid.bam
+    $GFFread_Path/gffread -w $Scratch_Directory/$sraid.transcripts.fasta -g $Genome $Scratch_Directory/$sraid.transcripts.gtf
+    grep '>' $Scratch_Directory/$sraid.transcripts.fasta | awk '{print $1}' | sed 's/>//g' | sort -u > $Scratch_Directory/$sraid.transcripts.txt
+}
+
+# Filter transcripts by length
+filter_transcripts() {
+    local sraid=$1
+    awk -v min_length="$Min_length" '($5-$4) >= min_length { print $0 }' $Scratch_Directory/$sraid.transcripts.gtf > $Scratch_Directory/$sraid.long_transcripts.gtf
+}
+
+# Remove overlaps with known mRNAs
+filter_long_transcript() {
+    local sraid=$1
+    $FEELnc_Path/FEELnc_filter.pl -i $Scratch_Directory/$sraid.long_transcripts.gtf -a $Scratch_Directory/Aradu_mRNA.gtf > $Scratch_Directory/$sraid.candidate_long_transcripts.gtf
+
+    echo "$sraid: FEELnc filtering done"
+
+    cut -d ";" -f 2 $Scratch_Directory/$sraid.candidate_long_transcripts.gtf | sed 's/ transcript_id //g' | sed 's/"//g' | sort -u > $Scratch_Directory/$sraid.long_transcripts.txt
+}
+
+CPAT() {
+    local sraid=$1
+  #  $Python_Path
+    cpat -x $Scratch_Directory/Aradu_Plant_Hexamer.tsv -d $Scratch_Directory/Aradu_Plant.logit.RData.logit.RData -g $Scratch_Directory/$sraid.transcripts.fasta --min-orf=120  -o $Scratch_Directory/$sraid.CPAT_plant.output
+}
+
+UniProt() {
+    local sraid=$1
+    $Software_Directory/diamond makedb --in uniprot_sprot.fasta -d uniprot_out
+    $Software_Directory/diamond blastx -d uniprot_out -q $Scratch_Directory/$sraid.transcripts.fasta -o $Scratch_Directory/$sraid.uniprotoutput.txt
+}
