@@ -23,6 +23,7 @@ Rna_seq_folder="/path/RNA_Seq"
 Genome="/path/GCF_000817695.2_Aradu1.1_genomic.fna"
 Index="/path/GCF_000817695.2_Aradu1.1_genomic"
 mRNA="/path/Aradu_mRNA.gtf"
+Annotation="/path/GCF_000817695.2_Aradu1.1_genomic.gtf"
 
 # Automatically gather SRA IDs from the folder
 SRAids=()
