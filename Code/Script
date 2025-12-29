@@ -23,7 +23,6 @@ Rna_seq_folder="/path/RNA_Seq"
 Genome="/path/GCF_000817695.2_Aradu1.1_genomic.fna"
 Index="/path/GCF_000817695.2_Aradu1.1_genomic"
 mRNA="/path/Aradu_mRNA.gtf"
-Annotation="/path/GCF_000817695.2_Aradu1.1_genomic.gtf"
 
 # Automatically gather SRA IDs from the folder
 SRAids=()
@@ -103,28 +102,92 @@ filter_long_transcript() {
 
 # Using LncFinder-plant
 LncFinder() {
-    local sraid=$1
+    library(seqinr)
+    library(LncFinder)
+    
+    Scratch <- "/path/Aradu"
+    lnc_fasta <- file.path(Scratch, "Aradu_ncRNA_sequences.fasta")
+    mrna_fasta <- file.path(Scratch, "Aradu_cds_sequences.fasta")
+    
+    frequency <- file.path(Scratch, "Aradu_frequencies.rda")
+    plant_model <- file.path(Scratch, "Aradu_model.rda")
+    
+    mRNA <- seqinr::read.fasta(file = mrna_fasta)
+    
+    lncRNA <- seqinr::read.fasta(file = lnc_fasta)
+    
+    #generate the feature file
+    #frequencies <- make_frequencies(cds.seq = mRNA, lncRNA.seq = lncRNA, SS.features = FALSE, cds.format = "DNA", lnc.format = "DNA", check.cds = TRUE, ignore.illegal = TRUE)
+    
+    # Make own model
+    #Aradu_model <- build_model(lncRNA.seq = lncRNA, mRNA.seq = mRNA, frequencies, SS.features = FALSE, lncRNA.format = "DNA",mRNA.format = "DNA", parallel.cores = -1, folds.num = 10, seed = 1, gamma.range = (2^seq(-5, 0, 1)), cost.range = c(1, 4, 8, 16, 24, 32))
+    
+    # Save the model to a .rda file
+    #save(Aradu_model, file = "$Scratch/Aradu_model.rda")
+    
+    
+    #loading the model
+    #plant = readRDS
+    load(plant_model)
+    load(frequency)
+    ls()
+    Seqs <- seqinr::read.fasta(file = candidate_transcript.fasta)
+    Plant_results <- LncFinder::lnc_finder(Seqs, SS.features = FALSE, format = "DNA", frequencies.file = frequencies, svm.model = Aradu_model, parallel.cores = 2)
+    write.table(Plant_results, file = "LncFinder_result.txt", sep ="\t",row.names =TRUE, col.names =TRUE,quote =FALSE)
 }
 
 
 # Using CPAT
 CPAT() {
-    local sraid=$1
-  # $Python_Path
-    cpat -x $Scratch_Directory/Aradu_Plant_Hexamer.tsv -d $Scratch_Directory/Aradu_Plant.logit.RData.logit.RData -g $Scratch_Directory/$sraid.transcripts.fasta --min-orf=120  -o $Scratch_Directory/$sraid.CPAT_plant.output
+    lnc_fasta <- file.path(Scratch, "Aradu_ncRNA_sequences.fasta")
+    mrna_fasta <- file.path(Scratch, "Aradu_cds_sequences.fasta")
+
+    make_hexamer_tab -c mrna_fasta -n lnc_fasta > Aradu_Plant_Hexamer.tsv
+    make_logitModel -x Aradu_Plant_Hexamer.tsv -c mrna_fasta -n lnc_fasta -o Aradu_Plant.logit.RData
+
+    cpat -x $Scratch_Directory/Aradu_Plant_Hexamer.tsv -d $Scratch_Directory/Aradu_Plant.logit.RData.logit.RData -g $Scratch_Directory/candidate.transcripts.fasta --min-orf=120 -o $Scratch_Directory/CPAT_plant.output
 }
 
 # Using Uniprot
 UniProt() {
-    local sraid=$1
     $Software_Directory/diamond makedb --in uniprot_sprot.fasta -d uniprot_out
-    $Software_Directory/diamond blastx -d uniprot_out -q $Scratch_Directory/$sraid.transcripts.fasta -o $Scratch_Directory/$sraid.uniprotoutput.txt
+    $Software_Directory/diamond blastx -d uniprot_out -q $Scratch_Directory/candidate_transcripts.fasta -o $Scratch_Directory/uniprotoutput.txt
 }
 
 # Using FEELnc
 FEELnc() {
-    local sraid=$1
+    $GFFCompare_Path -r $Annotation -o $WD/MERGED_gffcompare_gtfoutput.gtf $SD/candidate_transcript.gtf
+        
+    $FEELnc_Path/FEELnc_filter.pl  \
+        -p 12 -i $MERGED_gffcompare_gtfoutput.gtf.annotated.gtf  \
+        -a $Annotation -b transcript_biotype=protein_coding \
+        --monoex=-1  \
+        -o $WD/FEELnc_filtered_trimmed_MERGED_gffcompare.out  \
+        > $WD/Candidatelnc_FEELnc_Filtered.gtf
+        
+    $FEELnc_Path/FEELnc_codpot.pl \
+        -p 12 \
+        -i $WD/Candidatelnc_FEELnc_Filtered.gtf \
+        -a $Annotation \
+        -g $Genome  \
+        -b transcript_biotype=protein_coding \
+        --outdir $WD/Coding_Potential \
+        --outname=Aradu_Feelnc \
+        --mode=shuffle
+
+    $FEELnc_Path/FEELnc_classifier.pl \
+        --biotype -i \
+        $WD/Coding_Potential/Aradu_Feelnc.lncRNA.gtf \
+        -a $Annotation \
+        > $WD/FEELnc_lncRNA_classes.txt
+    }
+
+# Combine CPC2 + LncFinder + CPAT + Uniprot + FEELnc
+Result_combine() {
+    Intersect all lncRNAs from 
 }
+
+
 
 # Main Pipeline Execution
 index_genome
