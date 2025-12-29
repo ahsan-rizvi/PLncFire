@@ -1,6 +1,6 @@
 #!/bin/sh
 
-#PBS -N mrna_pipeline
+#PBS -N PLncFire_pipeline
 #PBS -l nodes=1:ppn=30
 #PBS -o /path for output/job.$PBS_JOBID.out
 #PBS -e /path for error/job.$PBS_JOBID.err
@@ -101,6 +101,12 @@ filter_long_transcript() {
     cut -d ";" -f 2 $Scratch_Directory/$sraid.candidate_long_transcripts.gtf | sed 's/ transcript_id //g' | sed 's/"//g' | sort -u > $Scratch_Directory/$sraid.long_transcripts.txt
 }
 
+# Using CPC2
+CPC2() {
+    $Software_Directory/diamond makedb --in uniprot_sprot.fasta -d uniprot_out
+    $Software_Directory/diamond blastx -d uniprot_out -q $Scratch_Directory/candidate_transcripts.fasta -o $Scratch_Directory/uniprotoutput.txt
+}
+
 # Using LncFinder-plant
 LncFinder() {
     library(seqinr)
@@ -125,8 +131,7 @@ LncFinder() {
     
     # Save the model to a .rda file
     #save(Aradu_model, file = "$Scratch/Aradu_model.rda")
-    
-    
+     
     #loading the model
     #plant = readRDS
     load(plant_model)
@@ -186,6 +191,11 @@ FEELnc() {
 # Combine CPC2 + LncFinder + CPAT + Uniprot + FEELnc
 Result_combine() {
     Intersect all lncRNAs from 
+    * CPC2
+    * LncFinder_result.txt
+    * CPAT_plant.output
+    * uniprotoutput.txt
+    * FEELnc_lncRNA_classes
 }
 
 
@@ -207,12 +217,11 @@ echo "Processing Stage 2"
 Merge_transcripts
 filter_transcripts 
 filter_long_transcript 
-LncFinder $sraid
-CPAT $sraid
+CPC2
+LncFinder
+CPAT
 UniProt
 FEELnc 
 Result_combine
-
-
 
 echo "Pipeline completed successfully."
