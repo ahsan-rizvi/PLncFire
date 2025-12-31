@@ -1,5 +1,5 @@
 # PLncFire
-A Scalable Pipeline for Transcriptome-wide Discovery of Plant lncRNAs
+A scalable pipeline for transcriptome-wide discovery of plant lncRNAs
 
 ## Project Overview
 The project PLncFire is a scalable and reproducible computational pipeline for genome-wide identification and annotation of plant long non-coding RNAs (lncRNAs) from RNA-seq data. It integrates transcript assembly with consensus coding-potential assessment using CPC2, PlantLncPipe, and FEELnc to generate high-confidence known and novel lncRNA predictions, and supports downstream differential expression analysis across diverse plant species.
